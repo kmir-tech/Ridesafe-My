@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { MALAYSIA_LOCATIONS } from "@/lib/locations";
-import { RouteCheckData, SafetyLevel } from "@/lib/types";
+import { useState, useCallback } from "react";
+import { RouteCheckData, SafetyLevel, WeatherData, MalaysiaLocation } from "@/lib/types";
 import { getSafetyColor } from "@/lib/safety";
 import { useI18n } from "@/contexts/I18nContext";
 import NavigationHandoff from "@/components/NavigationHandoff";
 import RideLogCard from "@/components/RideLogCard";
-import { WeatherData } from "@/lib/types";
+import { formatLocationDisplay, locationsMatch } from "@/lib/places";
 
 interface RouteCheckProps {
   onRouteCheck: (
@@ -20,14 +19,19 @@ interface RouteCheckProps {
   loading: boolean;
   error: string | null;
   weatherData?: WeatherData | null;
+  startLocation: MalaysiaLocation | null;
+  endLocation: MalaysiaLocation | null;
+  routePlacementMode: "start" | "end" | null;
+  onPickRoutePoint: (kind: "start" | "end") => void;
+  onSwapRoutePoints: () => void;
+  onClearRoutePoints: () => void;
+  onLoadSavedRoute: (from: MalaysiaLocation, to: MalaysiaLocation) => void;
 }
 
 interface SavedRoute {
   id: string;
-  fromIdx: number;
-  toIdx: number;
-  fromName: string;
-  toName: string;
+  from: MalaysiaLocation;
+  to: MalaysiaLocation;
   lastScore?: number;
   lastLevel?: SafetyLevel;
 }
@@ -35,22 +39,31 @@ interface SavedRoute {
 const LS_KEY = "ridesafe-saved-routes";
 const MAX_SAVED = 5;
 
-function isValidSavedRoute(r: unknown): r is SavedRoute {
+function isValidLocation(value: unknown): value is MalaysiaLocation {
   return (
-    typeof r === "object" &&
-    r !== null &&
-    "id" in r &&
-    "fromIdx" in r &&
-    "toIdx" in r &&
-    "fromName" in r &&
-    "toName" in r &&
-    typeof (r as SavedRoute).id === "string" &&
-    typeof (r as SavedRoute).fromIdx === "number" &&
-    typeof (r as SavedRoute).toIdx === "number" &&
-    (r as SavedRoute).fromIdx >= 0 &&
-    (r as SavedRoute).fromIdx < MALAYSIA_LOCATIONS.length &&
-    (r as SavedRoute).toIdx >= 0 &&
-    (r as SavedRoute).toIdx < MALAYSIA_LOCATIONS.length
+    typeof value === "object" &&
+    value !== null &&
+    "name" in value &&
+    "lat" in value &&
+    "lon" in value &&
+    "state" in value &&
+    typeof (value as MalaysiaLocation).name === "string" &&
+    typeof (value as MalaysiaLocation).lat === "number" &&
+    typeof (value as MalaysiaLocation).lon === "number" &&
+    typeof (value as MalaysiaLocation).state === "string"
+  );
+}
+
+function isValidSavedRoute(value: unknown): value is SavedRoute {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    "from" in value &&
+    "to" in value &&
+    typeof (value as SavedRoute).id === "string" &&
+    isValidLocation((value as SavedRoute).from) &&
+    isValidLocation((value as SavedRoute).to)
   );
 }
 
@@ -71,140 +84,13 @@ function persistSavedRoutes(routes: SavedRoute[]): void {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(routes));
   } catch {
-    // Storage quota exceeded — silently fail
+    // Ignore storage failures in the beta UI.
   }
 }
 
-function safeLocation(idx: number) {
-  if (idx < 0 || idx >= MALAYSIA_LOCATIONS.length) return null;
-  return MALAYSIA_LOCATIONS[idx];
+function formatCoords(location: MalaysiaLocation): string {
+  return `${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}`;
 }
-
-// --- Combobox ---
-
-interface ComboboxProps {
-  value: string; // index as string, or ""
-  onChange: (idx: string) => void;
-  placeholder: string;
-  excludeIdx?: string;
-}
-
-function LocationCombobox({
-  value,
-  onChange,
-  placeholder,
-  excludeIdx,
-}: ComboboxProps) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const selectedLoc = value !== "" ? safeLocation(parseInt(value, 10)) : null;
-
-  const filtered = MALAYSIA_LOCATIONS.filter((loc, i) => {
-    if (excludeIdx !== "" && i === parseInt(excludeIdx ?? "", 10)) return false;
-    if (!query) return true;
-    return (
-      loc.name.toLowerCase().includes(query.toLowerCase()) ||
-      loc.state.toLowerCase().includes(query.toLowerCase())
-    );
-  });
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-        setQuery("");
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const handleInputFocus = () => {
-    setQuery("");
-    setOpen(true);
-  };
-
-  const handleSelect = (idx: number) => {
-    onChange(idx.toString());
-    setOpen(false);
-    setQuery("");
-    inputRef.current?.blur();
-  };
-
-  const displayValue = open
-    ? query
-    : selectedLoc
-    ? `${selectedLoc.name}, ${selectedLoc.state}`
-    : "";
-
-  return (
-    <div ref={containerRef} className="relative">
-      <input
-        ref={inputRef}
-        type="text"
-        value={displayValue}
-        onChange={(e) => setQuery(e.target.value)}
-        onFocus={handleInputFocus}
-        placeholder={placeholder}
-        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-blue transition-colors"
-      />
-      {/* Clear button */}
-      {value !== "" && !open && (
-        <button
-          onClick={() => onChange("")}
-          className="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 hover:opacity-70 text-lg leading-none"
-          tabIndex={-1}
-          aria-label="Clear selection"
-        >
-          ×
-        </button>
-      )}
-
-      {open && (
-        <div
-          className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-y-auto z-50"
-          style={{
-            background: "rgba(15, 23, 42, 0.98)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-            maxHeight: "200px",
-          }}
-        >
-          {filtered.length === 0 ? (
-            <div className="px-3 py-2 text-sm opacity-40">No results</div>
-          ) : (
-            filtered.map((loc, _i) => {
-              const idx = MALAYSIA_LOCATIONS.indexOf(loc);
-              return (
-                <button
-                  key={loc.name}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    handleSelect(idx);
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/60 transition-colors border-b last:border-0"
-                  style={{ borderColor: "rgba(255,255,255,0.05)" }}
-                >
-                  <span className="font-medium">{loc.name}</span>
-                  <span className="ml-1 opacity-50 text-xs">{loc.state}</span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// --- Main component ---
 
 export default function RouteCheck({
   onRouteCheck,
@@ -212,111 +98,73 @@ export default function RouteCheck({
   loading,
   error,
   weatherData,
+  startLocation,
+  endLocation,
+  routePlacementMode,
+  onPickRoutePoint,
+  onSwapRoutePoints,
+  onClearRoutePoints,
+  onLoadSavedRoute,
 }: RouteCheckProps) {
   const { t } = useI18n();
-  const [fromIdx, setFromIdx] = useState("");
-  const [toIdx, setToIdx] = useState("");
-  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(
-    () => loadSavedRoutes()
-  );
-
-  const savedRoutesRef = useRef(savedRoutes);
-  savedRoutesRef.current = savedRoutes;
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(() => loadSavedRoutes());
 
   const handleCheck = useCallback(() => {
-    if (fromIdx === "" || toIdx === "" || fromIdx === toIdx) return;
-    const from = safeLocation(parseInt(fromIdx, 10));
-    const to = safeLocation(parseInt(toIdx, 10));
-    if (!from || !to) return;
-    onRouteCheck(from.lat, from.lon, to.lat, to.lon);
-  }, [fromIdx, toIdx, onRouteCheck]);
-
-  const handleSwap = () => {
-    setFromIdx(toIdx);
-    setToIdx(fromIdx);
-  };
-
-  const handleSaveRoute = () => {
-    if (fromIdx === "" || toIdx === "" || fromIdx === toIdx) return;
-    const fromIdxNum = parseInt(fromIdx, 10);
-    const toIdxNum = parseInt(toIdx, 10);
-    const from = safeLocation(fromIdxNum);
-    const to = safeLocation(toIdxNum);
-    if (!from || !to) return;
-
-    const isDuplicate = savedRoutes.some(
-      (r) => r.fromIdx === fromIdxNum && r.toIdx === toIdxNum
-    );
-    if (isDuplicate) return;
-
-    const newRoute: SavedRoute = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      fromIdx: fromIdxNum,
-      toIdx: toIdxNum,
-      fromName: from.name,
-      toName: to.name,
-      lastScore: data?.overall_score,
-      lastLevel: data?.overall_level,
-    };
-
-    const updated = [...savedRoutes, newRoute].slice(-MAX_SAVED);
-    setSavedRoutes(updated);
-    persistSavedRoutes(updated);
-  };
-
-  const handleDeleteRoute = (id: string) => {
-    const updated = savedRoutes.filter((r) => r.id !== id);
-    setSavedRoutes(updated);
-    persistSavedRoutes(updated);
-  };
-
-  const handleLoadSavedRoute = (route: SavedRoute) => {
-    const from = safeLocation(route.fromIdx);
-    const to = safeLocation(route.toIdx);
-    if (!from || !to) return;
-    setFromIdx(route.fromIdx.toString());
-    setToIdx(route.toIdx.toString());
-    onRouteCheck(from.lat, from.lon, to.lat, to.lon);
-  };
-
-  useEffect(() => {
-    if (!data || fromIdx === "" || toIdx === "") return;
-    const fromIdxNum = parseInt(fromIdx, 10);
-    const toIdxNum = parseInt(toIdx, 10);
-    const current = savedRoutesRef.current;
-
-    const updated = current.map((r) =>
-      r.fromIdx === fromIdxNum && r.toIdx === toIdxNum
-        ? { ...r, lastScore: data.overall_score, lastLevel: data.overall_level }
-        : r
-    );
-
-    const changed = updated.some(
-      (r, i) =>
-        r.lastScore !== current[i].lastScore ||
-        r.lastLevel !== current[i].lastLevel
-    );
-
-    if (changed) {
-      setSavedRoutes(updated);
-      persistSavedRoutes(updated);
+    if (!startLocation || !endLocation || locationsMatch(startLocation, endLocation)) {
+      return;
     }
-  }, [data, fromIdx, toIdx]);
+    onRouteCheck(startLocation.lat, startLocation.lon, endLocation.lat, endLocation.lon);
+  }, [endLocation, onRouteCheck, startLocation]);
 
-  const fromIdxNum = fromIdx !== "" ? parseInt(fromIdx, 10) : -1;
-  const toIdxNum = toIdx !== "" ? parseInt(toIdx, 10) : -1;
+  const handleSaveRoute = useCallback(() => {
+    if (!startLocation || !endLocation || locationsMatch(startLocation, endLocation)) {
+      return;
+    }
+
+    setSavedRoutes((prev) => {
+      const isDuplicate = prev.some(
+        (route) =>
+          locationsMatch(route.from, startLocation) &&
+          locationsMatch(route.to, endLocation)
+      );
+      if (isDuplicate) return prev;
+
+      const next = [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          from: startLocation,
+          to: endLocation,
+          lastScore: data?.overall_score,
+          lastLevel: data?.overall_level,
+        },
+      ].slice(-MAX_SAVED);
+      persistSavedRoutes(next);
+      return next;
+    });
+  }, [data?.overall_level, data?.overall_score, endLocation, startLocation]);
+
+  const handleDeleteRoute = useCallback((id: string) => {
+    setSavedRoutes((prev) => {
+      const next = prev.filter((route) => route.id !== id);
+      persistSavedRoutes(next);
+      return next;
+    });
+  }, []);
+
   const alreadySaved =
-    fromIdxNum >= 0 &&
-    toIdxNum >= 0 &&
+    startLocation !== null &&
+    endLocation !== null &&
     savedRoutes.some(
-      (r) => r.fromIdx === fromIdxNum && r.toIdx === toIdxNum
+      (route) =>
+        locationsMatch(route.from, startLocation) &&
+        locationsMatch(route.to, endLocation)
     );
 
   return (
     <div className="glass-card rounded-xl p-5">
       <h3 className="text-lg font-bold mb-4">{t("routeCheck")}</h3>
 
-      {/* Saved Routes */}
       {savedRoutes.length > 0 && (
         <div className="mb-4">
           <h4 className="text-xs opacity-60 uppercase tracking-wide mb-2">
@@ -327,7 +175,7 @@ export default function RouteCheck({
               <div
                 key={route.id}
                 className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-800/50 cursor-pointer hover:bg-slate-700/50 transition-colors"
-                onClick={() => handleLoadSavedRoute(route)}
+                onClick={() => onLoadSavedRoute(route.from, route.to)}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   {route.lastLevel && (
@@ -339,7 +187,7 @@ export default function RouteCheck({
                     />
                   )}
                   <span className="text-sm truncate">
-                    {route.fromName} → {route.toName}
+                    {route.from.name} - {route.to.name}
                   </span>
                   {route.lastScore != null && (
                     <span
@@ -360,7 +208,7 @@ export default function RouteCheck({
                     e.stopPropagation();
                     handleDeleteRoute(route.id);
                   }}
-                  aria-label={`Delete saved route ${route.fromName} to ${route.toName}`}
+                  aria-label={`Delete saved route ${route.from.name} to ${route.to.name}`}
                 >
                   ×
                 </button>
@@ -370,25 +218,72 @@ export default function RouteCheck({
         </div>
       )}
 
-      {/* Inputs */}
-      <div className="flex flex-col gap-2 mb-4">
-        <div>
-          <label className="text-xs opacity-60 uppercase tracking-wide mb-1 block">
-            {t("from")}
-          </label>
-          <LocationCombobox
-            value={fromIdx}
-            onChange={setFromIdx}
-            placeholder={t("selectStart")}
-            excludeIdx={toIdx}
-          />
+      {routePlacementMode && (
+        <div
+          className="mb-4 rounded-lg px-3 py-2 text-sm"
+          style={{
+            background: "rgba(59,130,246,0.08)",
+            border: "1px solid rgba(59,130,246,0.2)",
+            color: "#bfdbfe",
+          }}
+        >
+          {routePlacementMode === "start"
+            ? t("tapMapToPlaceStart")
+            : t("tapMapToPlaceEnd")}
         </div>
+      )}
 
-        {/* Swap button */}
-        <div className="flex justify-center">
+      <div className="space-y-3 mb-4">
+        <button
+          type="button"
+          onClick={() => onPickRoutePoint("start")}
+          className="w-full rounded-lg p-3 text-left transition-colors cursor-pointer"
+          style={{
+            background:
+              routePlacementMode === "start"
+                ? "rgba(34,197,94,0.12)"
+                : "rgba(15, 23, 42, 0.55)",
+            border:
+              routePlacementMode === "start"
+                ? "1px solid rgba(34,197,94,0.3)"
+                : "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs opacity-50 uppercase tracking-wide mb-1">
+                {t("from")}
+              </div>
+              {startLocation ? (
+                <>
+                  <div className="text-sm font-medium truncate">
+                    {formatLocationDisplay(startLocation)}
+                  </div>
+                  <div className="text-xs opacity-45 mt-0.5">
+                    {formatCoords(startLocation)}
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm opacity-45">{t("routeStartUnset")}</div>
+              )}
+            </div>
+            <span
+              className="px-3 py-2 rounded-lg text-xs font-medium shrink-0"
+              style={{
+                background: "rgba(34,197,94,0.12)",
+                border: "1px solid rgba(34,197,94,0.3)",
+                color: "#86efac",
+              }}
+            >
+              {t("pickStartOnMap")}
+            </span>
+          </div>
+        </button>
+
+        <div className="flex items-center justify-center gap-2">
           <button
-            onClick={handleSwap}
-            disabled={fromIdx === "" && toIdx === ""}
+            onClick={onSwapRoutePoints}
+            disabled={!startLocation && !endLocation}
             className="p-1.5 rounded-lg transition-all disabled:opacity-30"
             style={{
               background: "rgba(59,130,246,0.1)",
@@ -412,40 +307,88 @@ export default function RouteCheck({
               <path d="M17 8v12m0 0l4-4m-4 4l-4-4" />
             </svg>
           </button>
-        </div>
-
-        <div>
-          <label className="text-xs opacity-60 uppercase tracking-wide mb-1 block">
-            {t("to")}
-          </label>
-          <LocationCombobox
-            value={toIdx}
-            onChange={setToIdx}
-            placeholder={t("selectDest")}
-            excludeIdx={fromIdx}
-          />
+          <button
+            onClick={onClearRoutePoints}
+            disabled={!startLocation && !endLocation}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-30"
+            style={{
+              background: "rgba(239,68,68,0.08)",
+              border: "1px solid rgba(239,68,68,0.18)",
+              color: "#fca5a5",
+            }}
+          >
+            {t("clearRoute")}
+          </button>
         </div>
 
         <button
-          onClick={handleCheck}
-          disabled={
-            fromIdx === "" || toIdx === "" || fromIdx === toIdx || loading
-          }
-          className="w-full bg-accent-blue hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
+          type="button"
+          onClick={() => onPickRoutePoint("end")}
+          className="w-full rounded-lg p-3 text-left transition-colors cursor-pointer"
+          style={{
+            background:
+              routePlacementMode === "end"
+                ? "rgba(239,68,68,0.12)"
+                : "rgba(15, 23, 42, 0.55)",
+            border:
+              routePlacementMode === "end"
+                ? "1px solid rgba(239,68,68,0.3)"
+                : "1px solid rgba(255,255,255,0.06)",
+          }}
         >
-          {loading ? t("checkingRoute") : t("checkRouteSafety")}
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs opacity-50 uppercase tracking-wide mb-1">
+                {t("to")}
+              </div>
+              {endLocation ? (
+                <>
+                  <div className="text-sm font-medium truncate">
+                    {formatLocationDisplay(endLocation)}
+                  </div>
+                  <div className="text-xs opacity-45 mt-0.5">
+                    {formatCoords(endLocation)}
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm opacity-45">{t("routeEndUnset")}</div>
+              )}
+            </div>
+            <span
+              className="px-3 py-2 rounded-lg text-xs font-medium shrink-0"
+              style={{
+                background: "rgba(239,68,68,0.12)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                color: "#fca5a5",
+              }}
+            >
+              {t("pickEndOnMap")}
+            </span>
+          </div>
         </button>
       </div>
 
-      {/* Error */}
+      <p className="text-xs opacity-45 mb-4">{t("dragPinsHint")}</p>
+
+      <button
+        onClick={handleCheck}
+        disabled={
+          !startLocation ||
+          !endLocation ||
+          locationsMatch(startLocation, endLocation) ||
+          loading
+        }
+        className="w-full bg-accent-blue hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
+      >
+        {loading ? t("checkingRoute") : t("checkRouteSafety")}
+      </button>
+
       {error && (
         <div className="text-red-400 text-sm text-center py-2">{error}</div>
       )}
 
-      {/* Results */}
       {data && !loading && (
-        <div className="mt-2">
-          {/* Overall */}
+        <div className="mt-4">
           <div
             className="text-center py-3 px-4 rounded-lg mb-4"
             style={{
@@ -464,8 +407,8 @@ export default function RouteCheck({
                 data.overall_level === "Safe"
                   ? "safe"
                   : data.overall_level === "Caution"
-                  ? "caution"
-                  : "dangerous"
+                    ? "caution"
+                    : "dangerous"
               )}
             </div>
             <div
@@ -476,17 +419,12 @@ export default function RouteCheck({
             </div>
             {(data.distance_km != null || data.duration_min != null) && (
               <div className="flex justify-center gap-4 mt-2 text-xs opacity-60">
-                {data.distance_km != null && (
-                  <span>{data.distance_km} km</span>
-                )}
-                {data.duration_min != null && (
-                  <span>~{data.duration_min} min</span>
-                )}
+                {data.distance_km != null && <span>{data.distance_km} km</span>}
+                {data.duration_min != null && <span>~{data.duration_min} min</span>}
               </div>
             )}
           </div>
 
-          {/* Waypoints */}
           <div className="space-y-2">
             {data.waypoints.map((wp, i) => {
               const color = getSafetyColor(wp.safety_level as SafetyLevel);
@@ -515,7 +453,6 @@ export default function RouteCheck({
             })}
           </div>
 
-          {/* Connection dots visualization */}
           <div className="flex justify-center mt-3">
             <div className="flex items-center gap-1">
               {data.waypoints.map((wp, i) => (
@@ -536,7 +473,6 @@ export default function RouteCheck({
             </div>
           </div>
 
-          {/* Save route */}
           <button
             onClick={handleSaveRoute}
             disabled={alreadySaved}
@@ -552,7 +488,6 @@ export default function RouteCheck({
             {alreadySaved ? t("routeAlreadySaved") : t("saveRoute")}
           </button>
 
-          {/* Navigation handoff */}
           {data.waypoints.length >= 2 && (
             <NavigationHandoff
               fromLat={data.waypoints[0].lat}
@@ -564,7 +499,6 @@ export default function RouteCheck({
             />
           )}
 
-          {/* Ride log */}
           <RideLogCard routeData={data} weatherData={weatherData ?? null} />
         </div>
       )}

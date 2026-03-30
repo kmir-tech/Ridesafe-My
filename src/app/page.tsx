@@ -41,7 +41,13 @@ const RideSafeMap = dynamic(() => import("@/components/Map"), {
   ),
 });
 
+const IncidentReportModal = dynamic(
+  () => import("@/components/IncidentReportModal"),
+  { ssr: false }
+);
+
 type Tab = "weather" | "route";
+type RoutePlacementMode = "start" | "end" | null;
 
 function buildRouteSegments(data: RouteCheckData | null) {
   if (!data || data.waypoints.length < 2) return undefined;
@@ -62,11 +68,14 @@ const tabVariants = {
 
 export default function Home() {
   const { t } = useI18n();
-  const { user, authModalOpen, authModalTab, closeAuthModal } = useSupabase();
+  const { authModalOpen, authModalTab, closeAuthModal } = useSupabase();
 
   const [activeTab, setActiveTab] = useState<Tab>("weather");
   const [tabDirection, setTabDirection] = useState(0);
   const [selectedLocation, setSelectedLocation] = useState<MalaysiaLocation | null>(null);
+  const [routeStart, setRouteStart] = useState<MalaysiaLocation | null>(null);
+  const [routeEnd, setRouteEnd] = useState<MalaysiaLocation | null>(null);
+  const [routePlacementMode, setRoutePlacementMode] = useState<RoutePlacementMode>(null);
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
   const [routeData, setRouteData] = useState<RouteCheckData | null>(null);
@@ -230,11 +239,55 @@ export default function Home() {
 
   const routeSegments = buildRouteSegments(routeData);
 
-  // Dynamically import IncidentReportModal to keep initial bundle lean
-  const IncidentReportModal =
-    incidentReportCoords !== null
-      ? require("@/components/IncidentReportModal").default
-      : null;
+  const handleRoutePlacementStart = useCallback((kind: "start" | "end") => {
+    setActiveTab("route");
+    setTabDirection(1);
+    setRoutePlacementMode(kind);
+  }, []);
+
+  const handleRoutePointSet = useCallback(
+    (kind: "start" | "end", location: MalaysiaLocation) => {
+      setRouteData(null);
+      setActiveTab("route");
+      setTabDirection(1);
+
+      if (kind === "start") {
+        setRouteStart(location);
+        setRoutePlacementMode(routeEnd ? null : "end");
+        return;
+      }
+
+      setRouteEnd(location);
+      setRoutePlacementMode(null);
+    },
+    [routeEnd]
+  );
+
+  const handleSwapRoutePoints = useCallback(() => {
+    setRouteData(null);
+    setRouteStart(routeEnd);
+    setRouteEnd(routeStart);
+    setRoutePlacementMode(null);
+  }, [routeEnd, routeStart]);
+
+  const handleClearRoutePoints = useCallback(() => {
+    setRouteData(null);
+    setRouteStart(null);
+    setRouteEnd(null);
+    setRoutePlacementMode(null);
+  }, []);
+
+  const handleLoadSavedRoute = useCallback(
+    (from: MalaysiaLocation, to: MalaysiaLocation) => {
+      setRouteData(null);
+      setRouteStart(from);
+      setRouteEnd(to);
+      setRoutePlacementMode(null);
+      setActiveTab("route");
+      setTabDirection(1);
+    },
+    []
+  );
 
   return (
     <>
@@ -281,9 +334,18 @@ export default function Home() {
             <RideSafeMap
               onLocationSelect={handleLocationSelect}
               safetyScores={safetyScores}
+              selectedLocation={selectedLocation}
               routeSegments={routeSegments}
+              routeStart={routeStart}
+              routeEnd={routeEnd}
+              routePlacementMode={routePlacementMode}
+              onRoutePointSet={handleRoutePointSet}
               incidents={incidents}
-              onIncidentLongPress={(lat, lon) => setIncidentReportCoords({ lat, lon })}
+              onIncidentLongPress={
+                routePlacementMode === null
+                  ? (lat, lon) => setIncidentReportCoords({ lat, lon })
+                  : undefined
+              }
               heatmapPoints={heatmapPoints}
               onIncidentUpvote={handleIncidentUpvote}
             />
@@ -369,6 +431,13 @@ export default function Home() {
                       loading={routeLoading}
                       error={routeError}
                       weatherData={weatherData}
+                      startLocation={routeStart}
+                      endLocation={routeEnd}
+                      routePlacementMode={routePlacementMode}
+                      onPickRoutePoint={handleRoutePlacementStart}
+                      onSwapRoutePoints={handleSwapRoutePoints}
+                      onClearRoutePoints={handleClearRoutePoints}
+                      onLoadSavedRoute={handleLoadSavedRoute}
                     />
                   </ErrorBoundary>
                 </motion.div>

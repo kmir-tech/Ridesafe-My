@@ -1,25 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { MALAYSIA_LOCATIONS } from "@/lib/locations";
 import { MalaysiaLocation } from "@/lib/types";
+import { createCoordinateLocation } from "@/lib/places";
 import { useI18n } from "@/contexts/I18nContext";
 
 interface EmptyStateProps {
   onLocationSelect: (loc: MalaysiaLocation) => void;
-}
-
-function findNearest(lat: number, lon: number): MalaysiaLocation {
-  let nearest = MALAYSIA_LOCATIONS[0];
-  let minDist = Infinity;
-  for (const loc of MALAYSIA_LOCATIONS) {
-    const dist = Math.hypot(loc.lat - lat, loc.lon - lon);
-    if (dist < minDist) {
-      minDist = dist;
-      nearest = loc;
-    }
-  }
-  return nearest;
 }
 
 export default function EmptyState({ onLocationSelect }: EmptyStateProps) {
@@ -27,7 +14,7 @@ export default function EmptyState({ onLocationSelect }: EmptyStateProps) {
   const [gpsState, setGpsState] = useState<
     "idle" | "locating" | "denied" | "done"
   >("idle");
-  const [nearestName, setNearestName] = useState("");
+  const [selectedName, setSelectedName] = useState("");
 
   const handleUseMyLocation = () => {
     if (!navigator.geolocation) {
@@ -37,8 +24,12 @@ export default function EmptyState({ onLocationSelect }: EmptyStateProps) {
     setGpsState("locating");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const loc = findNearest(pos.coords.latitude, pos.coords.longitude);
-        setNearestName(loc.name);
+        const loc = createCoordinateLocation(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          "My Location"
+        );
+        setSelectedName(loc.name);
         setGpsState("done");
         onLocationSelect(loc);
       },
@@ -151,10 +142,10 @@ export default function EmptyState({ onLocationSelect }: EmptyStateProps) {
         <p className="text-xs text-red-400 mt-3">{t("permissionDenied")}</p>
       )}
 
-      {/* Nearest city found */}
-      {gpsState === "done" && nearestName && (
+      {/* Exact location selected */}
+      {gpsState === "done" && selectedName && (
         <p className="text-xs opacity-50 mt-3">
-          {t("nearestCity")} <span className="text-blue-400">{nearestName}</span>
+          {t("yourLocation")} <span className="text-blue-400">{selectedName}</span>
         </p>
       )}
     </div>

@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RideSafe MY
 
-## Getting Started
+RideSafe MY is a Malaysia-first motorcycle weather and route safety app. The product helps riders quickly understand rain, temperature, route conditions, and overall ride safety before they leave, with community hazard reporting layered in as a secondary feature.
 
-First, run the development server:
+## Beta Scope
+
+### Core
+- Map-based route weather and safety checking anywhere in Malaysia
+- Weather safety score backed by real weather signals
+- Heatmap for quick area-level safety scanning
+
+### Secondary
+- Community hazard reporting and confirmation
+- Push alerts for saved routes
+- Ride logs and account sync
+
+### Experimental
+- AI riding advisor
+
+## Beta Success Metric
+
+A rider can open the app on mobile, place a route start and end point anywhere in Malaysia, and understand whether it is safe to ride in under 10 seconds.
+
+## Product Principles
+
+- Weather comes first: rain, temperature, and route conditions should be more prominent than the abstract score.
+- Malaysia-first and Malaysia-forever: the product is built specifically for Malaysian motorcycle riders.
+- Map-first UX: the map should feel like the product, not a supporting widget.
+- Hazards stay visible, but they remain secondary to weather and route safety.
+
+## Current Stack
+
+- Next.js 16
+- React 19
+- TypeScript
+- Supabase
+- Upstash Redis
+- Leaflet / React Leaflet
+- Web Push
+- Open-Meteo and OpenStreetMap services
+
+## Local Development
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Copy environment variables:
+
+```bash
+Copy-Item .env.example .env.local
+```
+
+3. Start the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+4. Run lint:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run lint
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Environment Variables
 
-## Learn More
+See [.env.example](C:/Users/User/ridesafe-my/.env.example) for the full template. The main integrations are:
 
-To learn more about Next.js, take a look at the following resources:
+- Supabase
+- Upstash Redis
+- VAPID keys for push notifications
+- Anthropic for the experimental AI advisor
+- Cron secret for scheduled checks
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Near-Term Priorities
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Support true draggable route anchors anywhere in Malaysia.
+2. Remove dependence on the 12 fixed city presets for route selection.
+3. Make raw weather and route conditions more prominent than the safety score.
+4. Stabilize the beta UX on mobile and clean up lint/runtime issues.

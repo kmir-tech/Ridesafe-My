@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { MalaysiaLocation } from "@/lib/types";
-import { MALAYSIA_LOCATIONS } from "@/lib/locations";
+import { createCoordinateLocation } from "@/lib/places";
 import { useI18n } from "@/contexts/I18nContext";
 
 interface NominatimResult {
@@ -20,19 +20,6 @@ interface NominatimResult {
 
 interface AddressSearchProps {
   onSelect: (loc: MalaysiaLocation) => void;
-}
-
-function findNearest(lat: number, lon: number): MalaysiaLocation {
-  let nearest = MALAYSIA_LOCATIONS[0];
-  let minDist = Infinity;
-  for (const loc of MALAYSIA_LOCATIONS) {
-    const dist = Math.hypot(loc.lat - lat, loc.lon - lon);
-    if (dist < minDist) {
-      minDist = dist;
-      nearest = loc;
-    }
-  }
-  return nearest;
 }
 
 export default function AddressSearch({ onSelect }: AddressSearchProps) {
@@ -95,8 +82,13 @@ export default function AddressSearch({ onSelect }: AddressSearchProps) {
   const handleSelect = (result: NominatimResult) => {
     const lat = parseFloat(result.lat);
     const lon = parseFloat(result.lon);
-    const nearest = findNearest(lat, lon);
-    onSelect(nearest);
+    const location = createCoordinateLocation(
+      lat,
+      lon,
+      displayName(result),
+      result.address?.state ?? "Malaysia"
+    );
+    onSelect(location);
     setQuery("");
     setOpen(false);
     setResults([]);

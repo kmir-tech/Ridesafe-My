@@ -8,6 +8,7 @@ import {
   Popup,
   Polyline,
   useMap,
+  useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -17,6 +18,11 @@ import {
   MALAYSIA_ZOOM,
 } from "@/lib/locations";
 import { MalaysiaLocation, Incident } from "@/lib/types";
+import {
+  createCoordinateLocation,
+  formatLocationDisplay,
+  locationsMatch,
+} from "@/lib/places";
 import { getSafetyColor } from "@/lib/safety";
 import IncidentLayer from "@/components/IncidentLayer";
 import HeatmapLayer from "@/components/HeatmapLayer";
@@ -37,6 +43,24 @@ function createMarkerIcon(color: string) {
 }
 
 const defaultIcon = createMarkerIcon("#3b82f6");
+
+function createRoutePinIcon(label: string, color: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 44" width="32" height="44">
+    <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 28 16 28s16-16 16-28C32 7.2 24.8 0 16 0z" fill="${color}" stroke="#0f172a" stroke-width="2"/>
+    <circle cx="16" cy="16" r="9" fill="#0f172a"/>
+    <text x="16" y="20" text-anchor="middle" fill="#ffffff" font-size="11" font-family="Arial, sans-serif" font-weight="700">${label}</text>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: "route-pin-marker",
+    iconSize: [32, 44],
+    iconAnchor: [16, 44],
+    popupAnchor: [0, -40],
+  });
+}
+
+const routeStartIcon = createRoutePinIcon("A", "#22c55e");
+const routeEndIcon = createRoutePinIcon("B", "#ef4444");
 
 function UserLocationMarker({
   onLocationFound,
@@ -140,6 +164,29 @@ function LongPressDetector({
   return null;
 }
 
+function RoutePlacementController({
+  routePlacementMode,
+  onRoutePointSet,
+}: {
+  routePlacementMode: "start" | "end" | null;
+  onRoutePointSet?: (
+    kind: "start" | "end",
+    location: MalaysiaLocation
+  ) => void;
+}) {
+  useMapEvents({
+    click(e) {
+      if (!routePlacementMode || !onRoutePointSet) return;
+      onRoutePointSet(
+        routePlacementMode,
+        createCoordinateLocation(e.latlng.lat, e.latlng.lng)
+      );
+    },
+  });
+
+  return null;
+}
+
 interface RouteSegment {
   positions: [number, number][];
   color: string;
@@ -148,7 +195,12 @@ interface RouteSegment {
 interface MapProps {
   onLocationSelect: (location: MalaysiaLocation) => void;
   safetyScores: Record<string, { score: number; level: string }>;
+  selectedLocation?: MalaysiaLocation | null;
   routeSegments?: RouteSegment[];
+  routeStart?: MalaysiaLocation | null;
+  routeEnd?: MalaysiaLocation | null;
+  routePlacementMode?: "start" | "end" | null;
+  onRoutePointSet?: (kind: "start" | "end", location: MalaysiaLocation) => void;
   incidents?: Incident[];
   onIncidentLongPress?: (lat: number, lon: number) => void;
   heatmapPoints?: [number, number, number][];
@@ -158,7 +210,12 @@ interface MapProps {
 export default function RideSafeMap({
   onLocationSelect,
   safetyScores,
+  selectedLocation,
   routeSegments,
+  routeStart,
+  routeEnd,
+  routePlacementMode = null,
+  onRoutePointSet,
   incidents = [],
   onIncidentLongPress,
   heatmapPoints = [],
@@ -172,20 +229,19 @@ export default function RideSafeMap({
 
   const handleUserLocation = (lat: number, lon: number) => {
     setUserLoc({ lat, lon });
-    let nearest = MALAYSIA_LOCATIONS[0];
-    let minDist = Infinity;
-    for (const loc of MALAYSIA_LOCATIONS) {
-      const dist = Math.hypot(loc.lat - lat, loc.lon - lon);
-      if (dist < minDist) {
-        minDist = dist;
-        nearest = loc;
-      }
-    }
-    onLocationSelect(nearest);
+    onLocationSelect(createCoordinateLocation(lat, lon, "My Location"));
   };
 
   const handleLongPress = (lat: number, lon: number) => {
     if (onIncidentLongPress) onIncidentLongPress(lat, lon);
+  };
+
+  const handleLocationMarkerClick = (location: MalaysiaLocation) => {
+    if (routePlacementMode && onRoutePointSet) {
+      onRoutePointSet(routePlacementMode, location);
+      return;
+    }
+    onLocationSelect(location);
   };
 
   return (
@@ -200,6 +256,10 @@ export default function RideSafeMap({
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        />
+        <RoutePlacementController
+          routePlacementMode={routePlacementMode}
+          onRoutePointSet={onRoutePointSet}
         />
         <RadarLayer visible={showRadar} />
         <HeatmapLayer visible={showHeatmap} points={heatmapPoints} />
@@ -230,6 +290,80 @@ export default function RideSafeMap({
           onUpvote={onIncidentUpvote ?? (() => {})}
         />
 
+        {selectedLocation && !MALAYSIA_LOCATIONS.some((loc) => locationsMatch(loc, selectedLocation)) && (
+          <Marker
+            position={[selectedLocation.lat, selectedLocation.lon]}
+            icon={defaultIcon}
+            eventHandlers={{ click: () => handleLocationMarkerClick(selectedLocation) }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <strong>{selectedLocation.name}</strong>
+                <br />
+                <span className="text-xs opacity-70">{selectedLocation.state}</span>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
+        {routeStart && (
+          <Marker
+            position={[routeStart.lat, routeStart.lon]}
+            icon={routeStartIcon}
+            draggable
+            eventHandlers={{
+              dragend: (e) => {
+                if (!onRoutePointSet) return;
+                const marker = e.target as L.Marker;
+                const latLng = marker.getLatLng();
+                onRoutePointSet(
+                  "start",
+                  createCoordinateLocation(latLng.lat, latLng.lng)
+                );
+              },
+            }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <strong>Route Start</strong>
+                <br />
+                <span className="text-xs opacity-70">
+                  {formatLocationDisplay(routeStart)}
+                </span>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
+        {routeEnd && (
+          <Marker
+            position={[routeEnd.lat, routeEnd.lon]}
+            icon={routeEndIcon}
+            draggable
+            eventHandlers={{
+              dragend: (e) => {
+                if (!onRoutePointSet) return;
+                const marker = e.target as L.Marker;
+                const latLng = marker.getLatLng();
+                onRoutePointSet(
+                  "end",
+                  createCoordinateLocation(latLng.lat, latLng.lng)
+                );
+              },
+            }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <strong>Route End</strong>
+                <br />
+                <span className="text-xs opacity-70">
+                  {formatLocationDisplay(routeEnd)}
+                </span>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
         {/* Location markers */}
         {MALAYSIA_LOCATIONS.map((loc) => {
           const safety = safetyScores[loc.name];
@@ -242,7 +376,7 @@ export default function RideSafeMap({
               key={loc.name}
               position={[loc.lat, loc.lon]}
               icon={icon}
-              eventHandlers={{ click: () => onLocationSelect(loc) }}
+              eventHandlers={{ click: () => handleLocationMarkerClick(loc) }}
             >
               <Popup>
                 <div className="text-sm">
@@ -312,6 +446,19 @@ export default function RideSafeMap({
       {onIncidentLongPress && (
         <div className="absolute bottom-2 left-2 z-[1000] text-[10px] opacity-30">
           {t("tapMapToReport")}
+        </div>
+      )}
+
+      {routePlacementMode && (
+        <div
+          className="absolute bottom-2 left-2 right-2 z-[1000] text-xs text-center py-2 px-3 rounded-lg"
+          style={{
+            background: "rgba(15,23,42,0.88)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          Tap the map to place the {routePlacementMode === "start" ? "route start" : "route end"} pin, then drag to fine-tune.
         </div>
       )}
     </div>
