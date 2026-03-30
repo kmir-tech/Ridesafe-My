@@ -47,9 +47,26 @@ export interface RouteWaypoint {
   label: string;
   lat: number;
   lon: number;
+  temperature_c: number;
+  rain_intensity: "none" | "light" | "moderate" | "heavy";
+  rain_mm: number;
+  wind_speed_kmh: number;
+  visibility_km: number;
   safety_score: number;
   safety_level: SafetyLevel;
   weather_description: string;
+}
+
+export interface RouteWeatherSummary {
+  temperature_min_c: number;
+  temperature_max_c: number;
+  wind_min_kmh: number;
+  wind_max_kmh: number;
+  max_rain_mm: number;
+  max_rain_intensity: "none" | "light" | "moderate" | "heavy";
+  worst_waypoint_label: string;
+  worst_waypoint_reason: string;
+  summary_text: string;
 }
 
 export interface RouteCheckData {
@@ -58,6 +75,7 @@ export interface RouteCheckData {
   overall_score: number;
   overall_level: SafetyLevel;
   waypoints: RouteWaypoint[];
+  weather_summary: RouteWeatherSummary;
   distance_km?: number;
   duration_min?: number;
 }

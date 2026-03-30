@@ -28,10 +28,10 @@ export default function LocationSelector({
           <button
             key={loc.name}
             onClick={() => onSelect(loc)}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-sm border transition-all ${
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs border transition-all ${
               isSelected
-                ? "bg-accent-blue/20 border-accent-blue text-white font-semibold"
-                : "bg-card-bg border-card-border hover:border-slate-500"
+                ? "bg-accent-blue/12 border-accent-blue/70 text-white font-semibold"
+                : "bg-slate-900/50 border-white/8 text-slate-300 hover:border-slate-500"
             }`}
           >
             {safety && (

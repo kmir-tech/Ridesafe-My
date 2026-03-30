@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 import Header from "@/components/Header";
@@ -69,6 +69,7 @@ const tabVariants = {
 export default function Home() {
   const { t } = useI18n();
   const { authModalOpen, authModalTab, closeAuthModal } = useSupabase();
+  const mapSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [activeTab, setActiveTab] = useState<Tab>("weather");
   const [tabDirection, setTabDirection] = useState(0);
@@ -232,18 +233,48 @@ export default function Home() {
   }, []);
 
   const switchTab = (tab: Tab) => {
-    if (tab === activeTab) return;
+    if (tab === activeTab) {
+      if (tab === "route") {
+        const nextMode: RoutePlacementMode = routeStart
+          ? routeEnd
+            ? "start"
+            : "end"
+          : "start";
+        setRoutePlacementMode(nextMode);
+        scrollMapIntoView();
+      }
+      return;
+    }
     setTabDirection(tab === "route" ? 1 : -1);
     setActiveTab(tab);
+    if (tab === "route") {
+      const nextMode: RoutePlacementMode = routeStart
+        ? routeEnd
+          ? null
+          : "end"
+        : "start";
+      setRoutePlacementMode(nextMode);
+      if (nextMode) {
+        scrollMapIntoView();
+      }
+    }
   };
 
   const routeSegments = buildRouteSegments(routeData);
+
+  const scrollMapIntoView = useCallback(() => {
+    mapSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, []);
 
   const handleRoutePlacementStart = useCallback((kind: "start" | "end") => {
     setActiveTab("route");
     setTabDirection(1);
     setRoutePlacementMode(kind);
-  }, []);
+    scrollMapIntoView();
+  }, [scrollMapIntoView]);
 
   const handleRoutePointSet = useCallback(
     (kind: "start" | "end", location: MalaysiaLocation) => {
@@ -254,13 +285,16 @@ export default function Home() {
       if (kind === "start") {
         setRouteStart(location);
         setRoutePlacementMode(routeEnd ? null : "end");
+        if (!routeEnd) {
+          scrollMapIntoView();
+        }
         return;
       }
 
       setRouteEnd(location);
       setRoutePlacementMode(null);
     },
-    [routeEnd]
+    [routeEnd, scrollMapIntoView]
   );
 
   const handleSwapRoutePoints = useCallback(() => {
@@ -320,36 +354,46 @@ export default function Home() {
         <Header onRideHistoryOpen={() => setRideHistoryOpen(true)} />
 
         <main className="px-4 md:px-6 pb-8 space-y-4">
-          <AddressSearch onSelect={handleLocationSelect} />
+          <div ref={mapSectionRef}>
+            <ErrorBoundary componentName="Map">
+              <RideSafeMap
+                onLocationSelect={handleLocationSelect}
+                safetyScores={safetyScores}
+                selectedLocation={selectedLocation}
+                routeSegments={routeSegments}
+                routeStart={routeStart}
+                routeEnd={routeEnd}
+                routePlacementMode={routePlacementMode}
+                onRoutePointSet={handleRoutePointSet}
+                incidents={incidents}
+                onIncidentLongPress={
+                  routePlacementMode === null
+                    ? (lat, lon) => setIncidentReportCoords({ lat, lon })
+                    : undefined
+                }
+                heatmapPoints={heatmapPoints}
+                onIncidentUpvote={handleIncidentUpvote}
+              />
+            </ErrorBoundary>
+          </div>
 
-          <LocationSelector
-            selected={selectedLocation}
-            onSelect={handleLocationSelect}
-            safetyScores={safetyScores}
-          />
+          <div className="glass-card rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-sm font-semibold">{t("heatmapGuide")}</div>
+                <p className="text-xs opacity-55 mt-1">
+                  {activeTab === "route" ? t("routePlacementHint") : t("mapPrimaryHint")}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="opacity-45">{t("safer")}</span>
+                <div className="w-16 h-2 rounded-full bg-gradient-to-r from-green-500 via-yellow-400 to-red-500" />
+                <span className="opacity-45">{t("riskier")}</span>
+              </div>
+            </div>
 
-          <MonsoonBanner cityName={selectedLocation?.name ?? ""} />
-
-          <ErrorBoundary componentName="Map">
-            <RideSafeMap
-              onLocationSelect={handleLocationSelect}
-              safetyScores={safetyScores}
-              selectedLocation={selectedLocation}
-              routeSegments={routeSegments}
-              routeStart={routeStart}
-              routeEnd={routeEnd}
-              routePlacementMode={routePlacementMode}
-              onRoutePointSet={handleRoutePointSet}
-              incidents={incidents}
-              onIncidentLongPress={
-                routePlacementMode === null
-                  ? (lat, lon) => setIncidentReportCoords({ lat, lon })
-                  : undefined
-              }
-              heatmapPoints={heatmapPoints}
-              onIncidentUpvote={handleIncidentUpvote}
-            />
-          </ErrorBoundary>
+            <AddressSearch onSelect={handleLocationSelect} />
+          </div>
 
           {/* Tab switcher */}
           <div className="flex gap-1 glass-card rounded-lg p-1">
@@ -374,7 +418,7 @@ export default function Home() {
           </div>
 
           {/* Tab content */}
-          <div className="relative overflow-hidden">
+          <div className="relative overflow-x-hidden overflow-y-visible">
             <AnimatePresence mode="wait" custom={tabDirection}>
               {activeTab === "weather" ? (
                 <motion.div
@@ -435,6 +479,7 @@ export default function Home() {
                       endLocation={routeEnd}
                       routePlacementMode={routePlacementMode}
                       onPickRoutePoint={handleRoutePlacementStart}
+                      onSetRoutePoint={handleRoutePointSet}
                       onSwapRoutePoints={handleSwapRoutePoints}
                       onClearRoutePoints={handleClearRoutePoints}
                       onLoadSavedRoute={handleLoadSavedRoute}
@@ -444,6 +489,19 @@ export default function Home() {
               )}
             </AnimatePresence>
           </div>
+
+          <div className="space-y-2">
+            <div className="text-xs opacity-45 uppercase tracking-wide px-1">
+              {t("quickCityShortcuts")}
+            </div>
+            <LocationSelector
+              selected={selectedLocation}
+              onSelect={handleLocationSelect}
+              safetyScores={safetyScores}
+            />
+          </div>
+
+          <MonsoonBanner cityName={selectedLocation?.name ?? ""} />
 
           <footer className="text-center text-xs opacity-30 pt-4">
             RideSafe MY &middot; Ride safe, arrive safe

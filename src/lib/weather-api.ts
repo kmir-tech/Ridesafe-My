@@ -136,6 +136,7 @@ export async function fetchCurrentWeather(lat: number, lon: number) {
     temperature_c: cur.temperature_2m,
     humidity_pct: cur.relative_humidity_2m,
     hour,
+    weather_code: cur.weather_code,
   });
 
   return {
@@ -188,6 +189,7 @@ export async function fetchForecast(lat: number, lon: number, hours: number) {
       temperature_c: hourly.temperature_2m[i],
       humidity_pct: hourly.relative_humidity_2m[i],
       hour,
+      weather_code: hourly.weather_code[i],
     });
 
     return {

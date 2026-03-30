@@ -43,12 +43,25 @@ export default function ForecastTimeline({
           return (
             <div
               key={i}
-              className="flex flex-col items-center shrink-0 p-3 rounded-lg border min-w-[80px]"
+              className="flex flex-col items-center shrink-0 p-3 rounded-lg border min-w-[92px]"
               style={{
                 borderColor: `${color}40`,
                 backgroundColor: `${color}08`,
               }}
             >
+              <div
+                className="w-full h-1 rounded-full mb-2"
+                style={{
+                  background:
+                    hour.rain_intensity === "heavy"
+                      ? "#ef4444"
+                      : hour.rain_intensity === "moderate"
+                        ? "#f59e0b"
+                        : hour.rain_intensity === "light"
+                          ? "#38bdf8"
+                          : "rgba(255,255,255,0.08)",
+                }}
+              />
               <span className="text-xs opacity-60 mb-1">
                 {time.toLocaleTimeString([], {
                   hour: "2-digit",
@@ -66,9 +79,9 @@ export default function ForecastTimeline({
               <span className="text-xs opacity-70">
                 {hour.temperature_c}°C
               </span>
-              <span className="text-xs opacity-50">
-                {hour.wind_speed_kmh} km/h
-              </span>
+              <span className="text-[11px] opacity-55">{hour.rain_mm.toFixed(1)} mm</span>
+              <span className="text-[11px] opacity-45 capitalize">{hour.rain_intensity}</span>
+              <span className="text-[11px] opacity-45">{hour.wind_speed_kmh} km/h</span>
             </div>
           );
         })}

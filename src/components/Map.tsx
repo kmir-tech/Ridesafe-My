@@ -461,6 +461,24 @@ export default function RideSafeMap({
           Tap the map to place the {routePlacementMode === "start" ? "route start" : "route end"} pin, then drag to fine-tune.
         </div>
       )}
+
+      {showHeatmap && (
+        <div
+          className="absolute bottom-12 right-2 z-[1000] text-[11px] px-3 py-2 rounded-lg"
+          style={{
+            background: "rgba(15,23,42,0.88)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          <div className="font-medium mb-1">{t("heatmapGuide")}</div>
+          <div className="flex items-center gap-2">
+            <span className="opacity-55">{t("safer")}</span>
+            <div className="w-12 h-1.5 rounded-full bg-gradient-to-r from-green-500 via-yellow-400 to-red-500" />
+            <span className="opacity-55">{t("riskier")}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
