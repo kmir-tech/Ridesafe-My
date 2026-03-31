@@ -7,7 +7,6 @@ import {
   useEffect,
   useCallback,
   ReactNode,
-  useRef,
 } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -36,11 +35,7 @@ const SupabaseContext = createContext<SupabaseContextValue>({
 
 export function SupabaseProvider({ children }: { children: ReactNode }) {
   // Initialize client lazily on first render (client-side only)
-  const clientRef = useRef<SupabaseClient | null>(null);
-  if (!clientRef.current) {
-    clientRef.current = createSupabaseBrowserClient();
-  }
-  const supabase = clientRef.current;
+  const [supabase] = useState<SupabaseClient | null>(() => createSupabaseBrowserClient());
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(!!supabase); // only loading when Supabase is configured

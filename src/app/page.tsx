@@ -87,43 +87,66 @@ export default function Home() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [safetyScores, setSafetyScores] = useState<Record<string, { score: number; level: string }>>({});
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [incidentTimestamp, setIncidentTimestamp] = useState(0);
   const [incidentReportCoords, setIncidentReportCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [heatmapPoints, setHeatmapPoints] = useState<[number, number, number][]>([]);
   const [rideHistoryOpen, setRideHistoryOpen] = useState(false);
 
   // Register service worker
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    if (!("serviceWorker" in navigator)) return;
+
+    if (process.env.NODE_ENV !== "production") {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((registration) => {
+          registration.unregister().catch(() => {});
+        });
+      });
+
+      if ("caches" in window) {
+        caches.keys().then((keys) => {
+          keys
+            .filter((key) => key.startsWith("ridesafe-"))
+            .forEach((key) => {
+              caches.delete(key).catch(() => {});
+            });
+        });
+      }
+      return;
     }
+
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
   }, []);
 
-  // Fetch safety scores for all locations
+  // Lazily fetch safety scores for visible city markers (deferred to avoid blocking initial load)
   useEffect(() => {
-    async function fetchAllScores() {
-      const scores: Record<string, { score: number; level: string }> = {};
-      const batchSize = 4;
-      for (let i = 0; i < MALAYSIA_LOCATIONS.length; i += batchSize) {
-        const batch = MALAYSIA_LOCATIONS.slice(i, i + batchSize);
-        const results = await Promise.all(
-          batch.map(async (loc) => {
-            try {
-              const res = await fetch(`/api/weather?lat=${loc.lat}&lon=${loc.lon}`);
-              if (res.ok) {
-                const data: WeatherData = await res.json();
-                return { name: loc.name, score: data.safety_score, level: data.safety_level };
-              }
-            } catch {}
-            return null;
-          })
-        );
-        for (const r of results) {
-          if (r) scores[r.name] = { score: r.score, level: r.level };
+    const timeout = setTimeout(() => {
+      async function fetchAllScores() {
+        const scores: Record<string, { score: number; level: string }> = {};
+        const batchSize = 4;
+        for (let i = 0; i < MALAYSIA_LOCATIONS.length; i += batchSize) {
+          const batch = MALAYSIA_LOCATIONS.slice(i, i + batchSize);
+          const results = await Promise.all(
+            batch.map(async (loc) => {
+              try {
+                const res = await fetch(`/api/weather?lat=${loc.lat}&lon=${loc.lon}`);
+                if (res.ok) {
+                  const data: WeatherData = await res.json();
+                  return { name: loc.name, score: data.safety_score, level: data.safety_level };
+                }
+              } catch {}
+              return null;
+            })
+          );
+          for (const r of results) {
+            if (r) scores[r.name] = { score: r.score, level: r.level };
+          }
         }
+        setSafetyScores(scores);
       }
-      setSafetyScores(scores);
-    }
-    fetchAllScores();
+      fetchAllScores();
+    }, 2000); // Defer by 2s to prioritize map rendering
+    return () => clearTimeout(timeout);
   }, []);
 
   // Fetch incidents
@@ -134,6 +157,7 @@ export default function Home() {
         if (res.ok) {
           const data = await res.json();
           setIncidents(data.incidents ?? []);
+          setIncidentTimestamp(Date.now());
         }
       } catch {}
     };
@@ -142,13 +166,28 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch heatmap
+  // Fetch heatmap — initial load with fixed locations, then dynamic on bounds change
   useEffect(() => {
     fetch("/api/heatmap")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => d && setHeatmapPoints(d.points ?? []))
       .catch(() => {});
   }, []);
+
+  const handleHeatmapBoundsChange = useCallback(
+    async (bounds: { latMin: number; latMax: number; lonMin: number; lonMax: number }) => {
+      try {
+        const res = await fetch(
+          `/api/heatmap?lat_min=${bounds.latMin}&lat_max=${bounds.latMax}&lon_min=${bounds.lonMin}&lon_max=${bounds.lonMax}`
+        );
+        if (res.ok) {
+          const d = await res.json();
+          if (d.points) setHeatmapPoints(d.points);
+        }
+      } catch {}
+    },
+    []
+  );
 
   const fetchWeather = useCallback(async (loc: MalaysiaLocation) => {
     setWeatherLoading(true);
@@ -284,17 +323,23 @@ export default function Home() {
 
       if (kind === "start") {
         setRouteStart(location);
-        setRoutePlacementMode(routeEnd ? null : "end");
-        if (!routeEnd) {
-          scrollMapIntoView();
-        }
+        // Use functional update to avoid stale closure on routeEnd
+        setRouteEnd((currentEnd) => {
+          if (!currentEnd) {
+            setRoutePlacementMode("end");
+            scrollMapIntoView();
+          } else {
+            setRoutePlacementMode(null);
+          }
+          return currentEnd;
+        });
         return;
       }
 
       setRouteEnd(location);
       setRoutePlacementMode(null);
     },
-    [routeEnd, scrollMapIntoView]
+    [scrollMapIntoView]
   );
 
   const handleSwapRoutePoints = useCallback(() => {
@@ -366,12 +411,14 @@ export default function Home() {
                 routePlacementMode={routePlacementMode}
                 onRoutePointSet={handleRoutePointSet}
                 incidents={incidents}
+                incidentTimestamp={incidentTimestamp}
                 onIncidentLongPress={
                   routePlacementMode === null
                     ? (lat, lon) => setIncidentReportCoords({ lat, lon })
                     : undefined
                 }
                 heatmapPoints={heatmapPoints}
+                onHeatmapBoundsChange={handleHeatmapBoundsChange}
                 onIncidentUpvote={handleIncidentUpvote}
               />
             </ErrorBoundary>
@@ -490,16 +537,11 @@ export default function Home() {
             </AnimatePresence>
           </div>
 
-          <div className="space-y-2">
-            <div className="text-xs opacity-45 uppercase tracking-wide px-1">
-              {t("quickCityShortcuts")}
-            </div>
-            <LocationSelector
-              selected={selectedLocation}
-              onSelect={handleLocationSelect}
-              safetyScores={safetyScores}
-            />
-          </div>
+          <LocationSelector
+            selected={selectedLocation}
+            onSelect={handleLocationSelect}
+            safetyScores={safetyScores}
+          />
 
           <MonsoonBanner cityName={selectedLocation?.name ?? ""} />
 

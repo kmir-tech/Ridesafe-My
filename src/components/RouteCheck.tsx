@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   RouteCheckData,
   RouteWeatherSummary,
@@ -30,7 +30,7 @@ interface RouteCheckProps {
   endLocation: MalaysiaLocation | null;
   routePlacementMode: "start" | "end" | null;
   onPickRoutePoint: (kind: "start" | "end") => void;
-  onSetRoutePoint: (kind: "start" | "end", location: MalaysiaLocation) => void;
+  onSetRoutePoint?: (kind: "start" | "end", location: MalaysiaLocation) => void;
   onSwapRoutePoints: () => void;
   onClearRoutePoints: () => void;
   onLoadSavedRoute: (from: MalaysiaLocation, to: MalaysiaLocation) => void;
@@ -46,6 +46,8 @@ interface SavedRoute {
 
 const LS_KEY = "ridesafe-saved-routes";
 const MAX_SAVED = 5;
+const SAVED_ROUTES_EVENT = "ridesafe-saved-routes-change";
+const EMPTY_SAVED_ROUTES: SavedRoute[] = [];
 
 function isValidLocation(value: unknown): value is MalaysiaLocation {
   return (
@@ -76,21 +78,28 @@ function isValidSavedRoute(value: unknown): value is SavedRoute {
 }
 
 function loadSavedRoutes(): SavedRoute[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") return EMPTY_SAVED_ROUTES;
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
+    if (!raw) {
+      return EMPTY_SAVED_ROUTES;
+    }
+
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {
+      return EMPTY_SAVED_ROUTES;
+    }
+
     return parsed.filter(isValidSavedRoute);
   } catch {
-    return [];
+    return EMPTY_SAVED_ROUTES;
   }
 }
 
 function persistSavedRoutes(routes: SavedRoute[]): void {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(routes));
+    window.dispatchEvent(new Event(SAVED_ROUTES_EVENT));
   } catch {
     // Ignore storage failures in the beta UI.
   }
@@ -178,13 +187,38 @@ export default function RouteCheck({
   endLocation,
   routePlacementMode,
   onPickRoutePoint,
-  onSetRoutePoint,
+  onSetRoutePoint = () => {},
   onSwapRoutePoints,
   onClearRoutePoints,
   onLoadSavedRoute,
 }: RouteCheckProps) {
   const { t } = useI18n();
-  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(() => loadSavedRoutes());
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(EMPTY_SAVED_ROUTES);
+  const [expandedWaypoint, setExpandedWaypoint] = useState<number | null>(null);
+
+  useEffect(() => {
+    const syncSavedRoutes = () => {
+      setSavedRoutes(loadSavedRoutes());
+    };
+
+    const timer = window.setTimeout(syncSavedRoutes, 0);
+    window.addEventListener("storage", syncSavedRoutes);
+    window.addEventListener(SAVED_ROUTES_EVENT, syncSavedRoutes);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("storage", syncSavedRoutes);
+      window.removeEventListener(SAVED_ROUTES_EVENT, syncSavedRoutes);
+    };
+  }, []);
+
+  const handleRoutePointSelection = useCallback(
+    (kind: "start" | "end", location: MalaysiaLocation) => {
+      if (typeof onSetRoutePoint !== "function") return;
+      onSetRoutePoint(kind, location);
+    },
+    [onSetRoutePoint]
+  );
 
   const handleCheck = useCallback(() => {
     if (!startLocation || !endLocation || locationsMatch(startLocation, endLocation)) {
@@ -198,36 +232,30 @@ export default function RouteCheck({
       return;
     }
 
-    setSavedRoutes((prev) => {
-      const isDuplicate = prev.some(
-        (route) =>
-          locationsMatch(route.from, startLocation) &&
-          locationsMatch(route.to, endLocation)
-      );
-      if (isDuplicate) return prev;
+    const isDuplicate = savedRoutes.some(
+      (route) =>
+        locationsMatch(route.from, startLocation) &&
+        locationsMatch(route.to, endLocation)
+    );
+    if (isDuplicate) return;
 
-      const next = [
-        ...prev,
-        {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-          from: startLocation,
-          to: endLocation,
-          lastScore: data?.overall_score,
-          lastLevel: data?.overall_level,
-        },
-      ].slice(-MAX_SAVED);
-      persistSavedRoutes(next);
-      return next;
-    });
-  }, [data?.overall_level, data?.overall_score, endLocation, startLocation]);
+    const next = [
+      ...savedRoutes,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        from: startLocation,
+        to: endLocation,
+        lastScore: data?.overall_score,
+        lastLevel: data?.overall_level,
+      },
+    ].slice(-MAX_SAVED);
+    persistSavedRoutes(next);
+  }, [data?.overall_level, data?.overall_score, endLocation, savedRoutes, startLocation]);
 
   const handleDeleteRoute = useCallback((id: string) => {
-    setSavedRoutes((prev) => {
-      const next = prev.filter((route) => route.id !== id);
-      persistSavedRoutes(next);
-      return next;
-    });
-  }, []);
+    const next = savedRoutes.filter((route) => route.id !== id);
+    persistSavedRoutes(next);
+  }, [savedRoutes]);
 
   const alreadySaved =
     startLocation !== null &&
@@ -361,9 +389,10 @@ export default function RouteCheck({
               {t("pickStartOnMap")}
             </span>
           </button>
-          <div className="mt-3">
+          {/* Placed outside button to avoid nested interactive elements */}
+          <div className="mt-3" onClick={(e) => e.stopPropagation()}>
             <AddressSearch
-              onSelect={(location) => onSetRoutePoint("start", location)}
+              onSelect={(location) => handleRoutePointSelection("start", location)}
               placeholder={t("searchStartRoute")}
             />
           </div>
@@ -456,9 +485,10 @@ export default function RouteCheck({
               {t("pickEndOnMap")}
             </span>
           </button>
-          <div className="mt-3">
+          {/* Placed outside button to avoid nested interactive elements */}
+          <div className="mt-3" onClick={(e) => e.stopPropagation()}>
             <AddressSearch
-              onSelect={(location) => onSetRoutePoint("end", location)}
+              onSelect={(location) => handleRoutePointSelection("end", location)}
               placeholder={t("searchEndRoute")}
             />
           </div>
@@ -537,36 +567,37 @@ export default function RouteCheck({
             </div>
           )}
 
+          {/* Compact route info bar — score + distance inline */}
           <div
-            className="text-center py-3 px-4 rounded-lg mb-4"
+            className="flex items-center justify-between px-3 py-2 rounded-lg mb-4"
             style={{
-              backgroundColor: `${getSafetyColor(data.overall_level)}15`,
-              border: `1px solid ${getSafetyColor(data.overall_level)}40`,
+              backgroundColor: `${getSafetyColor(data.overall_level)}10`,
+              border: `1px solid ${getSafetyColor(data.overall_level)}30`,
             }}
           >
-            <div className="text-xs opacity-60 uppercase tracking-wide mb-1">
-              {t("routeRisk")}
-            </div>
-            <div
-              className="text-xl font-bold"
-              style={{ color: getSafetyColor(data.overall_level) }}
-            >
-              {t(
-                data.overall_level === "Safe"
-                  ? "safe"
-                  : data.overall_level === "Caution"
-                    ? "caution"
-                    : "dangerous"
-              )}
-            </div>
-            <div
-              className="text-sm opacity-80"
-              style={{ color: getSafetyColor(data.overall_level) }}
-            >
-              {t("score")}: {data.overall_score}/100
+            <div className="flex items-center gap-2">
+              <div
+                className="w-2.5 h-2.5 rounded-full"
+                style={{ backgroundColor: getSafetyColor(data.overall_level) }}
+              />
+              <span
+                className="text-sm font-bold"
+                style={{ color: getSafetyColor(data.overall_level) }}
+              >
+                {t(
+                  data.overall_level === "Safe"
+                    ? "safe"
+                    : data.overall_level === "Caution"
+                      ? "caution"
+                      : "dangerous"
+                )}
+              </span>
+              <span className="text-xs opacity-50">
+                {data.overall_score}/100
+              </span>
             </div>
             {(data.distance_km != null || data.duration_min != null) && (
-              <div className="flex justify-center gap-4 mt-2 text-xs opacity-60">
+              <div className="flex items-center gap-3 text-xs opacity-55">
                 {data.distance_km != null && <span>{data.distance_km} km</span>}
                 {data.duration_min != null && <span>~{data.duration_min} min</span>}
               </div>
@@ -579,10 +610,12 @@ export default function RouteCheck({
           <div className="space-y-2">
             {data.waypoints.map((wp, i) => {
               const color = getSafetyColor(wp.safety_level as SafetyLevel);
+              const isExpanded = expandedWaypoint === i;
               return (
                 <div
                   key={i}
-                  className="py-2 px-3 rounded-lg bg-slate-800/50"
+                  className="py-2 px-3 rounded-lg bg-slate-800/50 cursor-pointer transition-colors hover:bg-slate-700/50"
+                  onClick={() => setExpandedWaypoint(isExpanded ? null : i)}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-2 min-w-0">
@@ -597,10 +630,24 @@ export default function RouteCheck({
                         </span>
                       </div>
                     </div>
-                    <span className="text-sm font-bold shrink-0" style={{ color }}>
-                      {wp.safety_score}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-sm font-bold" style={{ color }}>
+                        {wp.safety_score}
+                      </span>
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className={`opacity-30 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </div>
                   </div>
+                  {/* Compact weather tags — always visible */}
                   <div className="flex flex-wrap gap-2 mt-2 pl-4">
                     <span className="text-[11px] opacity-55">
                       {typeof wp.rain_mm === "number" ? `${wp.rain_mm.toFixed(1)} mm ${wp.rain_intensity}` : wp.rain_intensity}
@@ -612,6 +659,40 @@ export default function RouteCheck({
                       {typeof wp.wind_speed_kmh === "number" ? `${wp.wind_speed_kmh} km/h` : "--"}
                     </span>
                   </div>
+                  {/* Expanded details */}
+                  {isExpanded && (
+                    <div className="mt-3 pt-3 pl-4 space-y-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="text-xs">
+                          <span className="opacity-45 uppercase tracking-wide">{t("rain")}</span>
+                          <div className="font-semibold mt-0.5" style={{ color: wp.rain_intensity === "heavy" ? "#fca5a5" : undefined }}>
+                            {typeof wp.rain_mm === "number" ? `${wp.rain_mm.toFixed(1)} mm` : "0 mm"} — {toLabelCase(wp.rain_intensity ?? "none")}
+                          </div>
+                        </div>
+                        <div className="text-xs">
+                          <span className="opacity-45 uppercase tracking-wide">{t("temp")}</span>
+                          <div className="font-semibold mt-0.5">
+                            {typeof wp.temperature_c === "number" ? `${wp.temperature_c}°C` : "--"}
+                          </div>
+                        </div>
+                        <div className="text-xs">
+                          <span className="opacity-45 uppercase tracking-wide">{t("wind")}</span>
+                          <div className="font-semibold mt-0.5" style={{ color: (wp.wind_speed_kmh ?? 0) > 30 ? "#fde68a" : undefined }}>
+                            {typeof wp.wind_speed_kmh === "number" ? `${wp.wind_speed_kmh} km/h` : "--"}
+                          </div>
+                        </div>
+                        <div className="text-xs">
+                          <span className="opacity-45 uppercase tracking-wide">{t("score")}</span>
+                          <div className="font-semibold mt-0.5" style={{ color }}>
+                            {wp.safety_score}/100
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-xs opacity-45">
+                        {wp.lat.toFixed(4)}, {wp.lon.toFixed(4)}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

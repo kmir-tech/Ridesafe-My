@@ -6,12 +6,43 @@ import { useMap } from "react-leaflet";
 interface HeatmapLayerProps {
   visible: boolean;
   points: [number, number, number][];
+  onBoundsChange?: (bounds: { latMin: number; latMax: number; lonMin: number; lonMax: number }) => void;
 }
 
-export default function HeatmapLayer({ visible, points }: HeatmapLayerProps) {
+export default function HeatmapLayer({ visible, points, onBoundsChange }: HeatmapLayerProps) {
   const map = useMap();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const layerRef = useRef<any>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Report bounds changes when heatmap is visible
+  useEffect(() => {
+    if (!visible || !onBoundsChange) return;
+
+    const reportBounds = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const b = map.getBounds();
+        onBoundsChange({
+          latMin: b.getSouth(),
+          latMax: b.getNorth(),
+          lonMin: b.getWest(),
+          lonMax: b.getEast(),
+        });
+      }, 2000);
+    };
+
+    // Report initial bounds
+    reportBounds();
+    map.on("moveend", reportBounds);
+    map.on("zoomend", reportBounds);
+
+    return () => {
+      map.off("moveend", reportBounds);
+      map.off("zoomend", reportBounds);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [visible, map, onBoundsChange]);
 
   useEffect(() => {
     if (!visible || points.length === 0) {

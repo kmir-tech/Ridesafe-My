@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
 import { Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import { Incident, IncidentType } from "@/lib/types";
@@ -65,18 +64,18 @@ interface IncidentLayerProps {
   visible: boolean;
   incidents: Incident[];
   onUpvote: (id: string) => void;
+  now: number;
 }
 
 export default function IncidentLayer({
   visible,
   incidents,
   onUpvote,
+  now,
 }: IncidentLayerProps) {
   const { t } = useI18n();
 
   if (!visible || incidents.length === 0) return null;
-
-  const now = Date.now();
 
   return (
     <>

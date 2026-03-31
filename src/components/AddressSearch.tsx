@@ -158,7 +158,14 @@ export default function AddressSearch({ onSelect, placeholder }: AddressSearchPr
             results.map((r, i) => (
               <button
                 key={i}
-                onClick={() => handleSelect(r)}
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  handleSelect(r);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                }}
                 className="w-full text-left px-4 py-3 text-sm hover:bg-slate-700/60 transition-colors border-b last:border-0"
                 style={{ borderColor: "rgba(255,255,255,0.05)" }}
               >

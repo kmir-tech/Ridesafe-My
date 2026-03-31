@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase-server";
 import { Redis } from "@upstash/redis";
 import { timingSafeEqual } from "crypto";
-
-const webpush = require("web-push");
+import webpush from "web-push";
 
 function verifyCronSecret(header: string | null): boolean {
   const secret = process.env.CRON_SECRET;
@@ -30,7 +29,7 @@ export async function GET(request: NextRequest) {
     process.env.VAPID_PRIVATE_KEY!
   );
 
-  const supabase = createSupabaseServiceClient();
+  const supabase = await createSupabaseServiceClient();
 
   const redis = new Redis({
     url: process.env.UPSTASH_REDIS_REST_URL!,

@@ -1,23 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useSyncExternalStore } from "react";
 import { useI18n } from "@/contexts/I18nContext";
+
+function subscribe(callback: () => void) {
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+  return () => {
+    window.removeEventListener("online", callback);
+    window.removeEventListener("offline", callback);
+  };
+}
+
+function getSnapshot() { return !navigator.onLine; }
+function getServerSnapshot() { return false; }
 
 export default function OfflineBanner() {
   const { t } = useI18n();
-  const [isOffline, setIsOffline] = useState(false);
-
-  useEffect(() => {
-    setIsOffline(!navigator.onLine);
-    const handleOffline = () => setIsOffline(true);
-    const handleOnline = () => setIsOffline(false);
-    window.addEventListener("offline", handleOffline);
-    window.addEventListener("online", handleOnline);
-    return () => {
-      window.removeEventListener("offline", handleOffline);
-      window.removeEventListener("online", handleOnline);
-    };
-  }, []);
+  const isOffline = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   if (!isOffline) return null;
 

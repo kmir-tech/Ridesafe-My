@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSupabase } from "@/contexts/SupabaseContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { AppNotification } from "@/lib/types";
@@ -40,7 +40,7 @@ export default function NotificationCenter() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -53,7 +53,7 @@ export default function NotificationCenter() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   // Poll every 60s when open
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function NotificationCenter() {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 60000);
     return () => clearInterval(interval);
-  }, [open, user]);
+  }, [open, user, fetchNotifications]);
 
   // Also fetch unread count periodically when closed
   useEffect(() => {

@@ -20,6 +20,7 @@ export const translations = {
     nearestCity: "Showing nearest city:",
 
     // Weather card
+    ridingAdvice: "Advice",
     goodConditions: "Good conditions for riding!",
     rideCaution: "Ride carefully - watch for slippery roads",
     avoidRiding: "Avoid riding - conditions are hazardous",
@@ -217,6 +218,7 @@ export const translations = {
     nearestCity: "Menunjukkan bandar terdekat:",
 
     // Weather card
+    ridingAdvice: "Nasihat",
     goodConditions: "Keadaan baik untuk menunggang!",
     rideCaution: "Tunggang berhati-hati - awas jalan licin",
     avoidRiding: "Elak menunggang - keadaan berbahaya",

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { getMonsoonAlert, MonsoonAlertLevel } from "@/lib/monsoon";
 
 interface MonsoonBannerProps {
   cityName: string;
 }
+
+const MONSOON_DISMISS_EVENT = "ridesafe-monsoon-dismiss-change";
 
 const LEVEL_STYLES: Record<
   Exclude<MonsoonAlertLevel, "none">,
@@ -32,42 +34,60 @@ const LEVEL_STYLES: Record<
 };
 
 export default function MonsoonBanner({ cityName }: MonsoonBannerProps) {
-  const [currentMonth, setCurrentMonth] = useState<number | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const currentMonth = useSyncExternalStore(
+    useCallback((callback: () => void) => {
+      window.addEventListener("focus", callback);
+      document.addEventListener("visibilitychange", callback);
+      return () => {
+        window.removeEventListener("focus", callback);
+        document.removeEventListener("visibilitychange", callback);
+      };
+    }, []),
+    () => new Date().getMonth() + 1,
+    () => null
+  );
 
-  // Resolve month client-side to avoid SSR/hydration mismatch
-  useEffect(() => {
-    setCurrentMonth(new Date().getMonth() + 1);
-  }, []);
+  const alert =
+    !cityName || currentMonth === null
+      ? null
+      : getMonsoonAlert(cityName, currentMonth);
+  const dismissalKey =
+    !alert || alert.level === "none"
+      ? null
+      : `ridesafe-monsoon-dismissed-${cityName}-${alert.seasonName}`;
 
-  // Re-check dismissal from sessionStorage whenever city or month changes
-  useEffect(() => {
-    if (!currentMonth || !cityName) return;
-    const alert = getMonsoonAlert(cityName, currentMonth);
-    if (alert.level === "none") return;
-    const key = `ridesafe-monsoon-dismissed-${cityName}-${alert.seasonName}`;
-    try {
-      setDismissed(sessionStorage.getItem(key) === "true");
-    } catch {
-      setDismissed(false);
-    }
-  }, [cityName, currentMonth]);
+  const dismissed = useSyncExternalStore(
+    useCallback((callback: () => void) => {
+      window.addEventListener("storage", callback);
+      window.addEventListener(MONSOON_DISMISS_EVENT, callback);
+      return () => {
+        window.removeEventListener("storage", callback);
+        window.removeEventListener(MONSOON_DISMISS_EVENT, callback);
+      };
+    }, []),
+    () => {
+      if (!dismissalKey) return false;
+      try {
+        return sessionStorage.getItem(dismissalKey) === "true";
+      } catch {
+        return false;
+      }
+    },
+    () => false
+  );
 
-  if (!cityName || currentMonth === null) return null;
-
-  const alert = getMonsoonAlert(cityName, currentMonth);
-  if (alert.level === "none" || dismissed) return null;
+  if (!alert || alert.level === "none" || dismissed) return null;
 
   const styles = LEVEL_STYLES[alert.level as Exclude<MonsoonAlertLevel, "none">];
 
   const handleDismiss = () => {
-    const key = `ridesafe-monsoon-dismissed-${cityName}-${alert.seasonName}`;
+    if (!dismissalKey) return;
     try {
-      sessionStorage.setItem(key, "true");
+      sessionStorage.setItem(dismissalKey, "true");
+      window.dispatchEvent(new Event(MONSOON_DISMISS_EVENT));
     } catch {
       // sessionStorage unavailable (e.g. private browsing restrictions)
     }
-    setDismissed(true);
   };
 
   return (

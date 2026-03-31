@@ -1,5 +1,5 @@
-const CACHE_NAME = "ridesafe-v1";
-const API_CACHE = "ridesafe-api-v1";
+const CACHE_NAME = "ridesafe-static-v2";
+const API_CACHE = "ridesafe-api-v2";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // Static assets to pre-cache on install
@@ -34,6 +34,13 @@ function isApiRequest(url) {
   return url.pathname.startsWith("/api/");
 }
 
+function shouldBypassStaticCache(url) {
+  return (
+    url.pathname.startsWith("/_next/") ||
+    url.pathname === "/sw.js"
+  );
+}
+
 function isFresh(cachedResponse) {
   const cachedAt = cachedResponse.headers.get("sw-cached-at");
   if (!cachedAt) return false;
@@ -41,7 +48,16 @@ function isFresh(cachedResponse) {
 }
 
 self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") {
+    return;
+  }
+
   const url = new URL(event.request.url);
+
+  if (shouldBypassStaticCache(url)) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   // API requests: network-first with 10-min cache fallback
   if (isApiRequest(url)) {

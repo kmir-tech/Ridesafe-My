@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useI18n } from "@/contexts/I18nContext";
 import { RideLog } from "@/lib/types";
@@ -29,25 +29,25 @@ export default function RideHistory({ open, onClose }: RideHistoryProps) {
   const [offset, setOffset] = useState(0);
   const LIMIT = 20;
 
-  const fetchLogs = async (reset = false) => {
+  const fetchLogs = useCallback(async (reset = false) => {
     setLoading(true);
     const o = reset ? 0 : offset;
     try {
       const res = await fetch(`/api/ride-logs?limit=${LIMIT}&offset=${o}`);
       if (res.ok) {
         const data = await res.json();
-        setLogs(reset ? data.logs : (prev) => [...prev, ...data.logs]);
+        setLogs(reset ? data.logs : (prev: RideLog[]) => [...prev, ...data.logs]);
         setTotal(data.total);
         setOffset(o + data.logs.length);
       }
     } finally {
       setLoading(false);
     }
-  };
+  }, [offset]);
 
   useEffect(() => {
     if (open) fetchLogs(true);
-  }, [open]);
+  }, [open, fetchLogs]);
 
   const avgScore =
     logs.length > 0
@@ -154,7 +154,7 @@ export default function RideHistory({ open, onClose }: RideHistoryProps) {
                           )}
                         </div>
                         {log.notes && (
-                          <p className="text-xs opacity-40 mt-1 italic">"{log.notes}"</p>
+                          <p className="text-xs opacity-40 mt-1 italic">&ldquo;{log.notes}&rdquo;</p>
                         )}
                       </div>
                     );

@@ -30,8 +30,8 @@ export async function createSupabaseServerClient() {
 
 // Service-role client for privileged server operations (cron, notifications)
 // NEVER expose to browser
-export function createSupabaseServiceClient() {
-  const { createClient } = require("@supabase/supabase-js");
+export async function createSupabaseServiceClient() {
+  const { createClient } = await import("@supabase/supabase-js");
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,

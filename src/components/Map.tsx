@@ -20,6 +20,7 @@ import {
 import { MalaysiaLocation, Incident } from "@/lib/types";
 import {
   createCoordinateLocation,
+  reverseGeocode,
   formatLocationDisplay,
   locationsMatch,
 } from "@/lib/places";
@@ -44,11 +45,19 @@ function createMarkerIcon(color: string) {
 
 const defaultIcon = createMarkerIcon("#3b82f6");
 
+function escapeXml(str: string): string {
+  return str.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c
+  );
+}
+
 function createRoutePinIcon(label: string, color: string) {
+  const safeLabel = escapeXml(label);
+  const safeColor = escapeXml(color);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 44" width="32" height="44">
-    <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 28 16 28s16-16 16-28C32 7.2 24.8 0 16 0z" fill="${color}" stroke="#0f172a" stroke-width="2"/>
+    <path d="M16 0C7.2 0 0 7.2 0 16c0 12 16 28 16 28s16-16 16-28C32 7.2 24.8 0 16 0z" fill="${safeColor}" stroke="#0f172a" stroke-width="2"/>
     <circle cx="16" cy="16" r="9" fill="#0f172a"/>
-    <text x="16" y="20" text-anchor="middle" fill="#ffffff" font-size="11" font-family="Arial, sans-serif" font-weight="700">${label}</text>
+    <text x="16" y="20" text-anchor="middle" fill="#ffffff" font-size="11" font-family="Arial, sans-serif" font-weight="700">${safeLabel}</text>
   </svg>`;
   return L.divIcon({
     html: svg,
@@ -71,11 +80,13 @@ function UserLocationMarker({
   const [position, setPosition] = useState<L.LatLng | null>(null);
 
   useEffect(() => {
-    map.locate({ setView: false, maxZoom: 10 });
-    map.on("locationfound", (e) => {
+    const handleFound = (e: L.LocationEvent) => {
       setPosition(e.latlng);
       onLocationFound(e.latlng.lat, e.latlng.lng);
-    });
+    };
+    map.locate({ setView: false, maxZoom: 10 });
+    map.on("locationfound", handleFound);
+    return () => { map.off("locationfound", handleFound); };
   }, [map, onLocationFound]);
 
   if (!position) return null;
@@ -177,10 +188,11 @@ function RoutePlacementController({
   useMapEvents({
     click(e) {
       if (!routePlacementMode || !onRoutePointSet) return;
-      onRoutePointSet(
-        routePlacementMode,
-        createCoordinateLocation(e.latlng.lat, e.latlng.lng)
-      );
+      const kind = routePlacementMode;
+      const { lat, lng: lon } = e.latlng;
+      // Set immediately with coords, then update with reverse-geocoded name
+      onRoutePointSet(kind, createCoordinateLocation(lat, lon));
+      reverseGeocode(lat, lon).then((loc) => onRoutePointSet(kind, loc));
     },
   });
 
@@ -202,8 +214,10 @@ interface MapProps {
   routePlacementMode?: "start" | "end" | null;
   onRoutePointSet?: (kind: "start" | "end", location: MalaysiaLocation) => void;
   incidents?: Incident[];
+  incidentTimestamp?: number;
   onIncidentLongPress?: (lat: number, lon: number) => void;
   heatmapPoints?: [number, number, number][];
+  onHeatmapBoundsChange?: (bounds: { latMin: number; latMax: number; lonMin: number; lonMax: number }) => void;
   onIncidentUpvote?: (id: string) => void;
 }
 
@@ -217,8 +231,10 @@ export default function RideSafeMap({
   routePlacementMode = null,
   onRoutePointSet,
   incidents = [],
+  incidentTimestamp = 0,
   onIncidentLongPress,
   heatmapPoints = [],
+  onHeatmapBoundsChange,
   onIncidentUpvote,
 }: MapProps) {
   const { t } = useI18n();
@@ -226,10 +242,27 @@ export default function RideSafeMap({
   const [showRadar, setShowRadar] = useState(false);
   const [showIncidents, setShowIncidents] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [gpsLocating, setGpsLocating] = useState(false);
+
+  const handleGpsClick = () => {
+    if (!("geolocation" in navigator)) return;
+    setGpsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        handleUserLocation(pos.coords.latitude, pos.coords.longitude);
+        setGpsLocating(false);
+      },
+      () => setGpsLocating(false),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
 
   const handleUserLocation = (lat: number, lon: number) => {
     setUserLoc({ lat, lon });
     onLocationSelect(createCoordinateLocation(lat, lon, "My Location"));
+    reverseGeocode(lat, lon).then((loc) => {
+      onLocationSelect(loc);
+    });
   };
 
   const handleLongPress = (lat: number, lon: number) => {
@@ -262,7 +295,7 @@ export default function RideSafeMap({
           onRoutePointSet={onRoutePointSet}
         />
         <RadarLayer visible={showRadar} />
-        <HeatmapLayer visible={showHeatmap} points={heatmapPoints} />
+        <HeatmapLayer visible={showHeatmap} points={heatmapPoints} onBoundsChange={onHeatmapBoundsChange} />
         <UserLocationMarker onLocationFound={handleUserLocation} />
         {onIncidentLongPress && (
           <LongPressDetector onLongPress={handleLongPress} />
@@ -288,6 +321,7 @@ export default function RideSafeMap({
           visible={showIncidents}
           incidents={incidents}
           onUpvote={onIncidentUpvote ?? (() => {})}
+          now={incidentTimestamp}
         />
 
         {selectedLocation && !MALAYSIA_LOCATIONS.some((loc) => locationsMatch(loc, selectedLocation)) && (
@@ -315,11 +349,9 @@ export default function RideSafeMap({
               dragend: (e) => {
                 if (!onRoutePointSet) return;
                 const marker = e.target as L.Marker;
-                const latLng = marker.getLatLng();
-                onRoutePointSet(
-                  "start",
-                  createCoordinateLocation(latLng.lat, latLng.lng)
-                );
+                const { lat, lng: lon } = marker.getLatLng();
+                onRoutePointSet("start", createCoordinateLocation(lat, lon));
+                reverseGeocode(lat, lon).then((loc) => onRoutePointSet("start", loc));
               },
             }}
           >
@@ -344,11 +376,9 @@ export default function RideSafeMap({
               dragend: (e) => {
                 if (!onRoutePointSet) return;
                 const marker = e.target as L.Marker;
-                const latLng = marker.getLatLng();
-                onRoutePointSet(
-                  "end",
-                  createCoordinateLocation(latLng.lat, latLng.lng)
-                );
+                const { lat, lng: lon } = marker.getLatLng();
+                onRoutePointSet("end", createCoordinateLocation(lat, lon));
+                reverseGeocode(lat, lon).then((loc) => onRoutePointSet("end", loc));
               },
             }}
           >
@@ -436,6 +466,26 @@ export default function RideSafeMap({
           </button>
         ))}
       </div>
+
+      {/* GPS locate button */}
+      <button
+        onClick={handleGpsClick}
+        disabled={gpsLocating}
+        className="absolute bottom-14 right-3 z-[1000] flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+        style={{
+          background: gpsLocating ? "rgba(59,130,246,0.3)" : "rgba(30,41,59,0.85)",
+          border: gpsLocating ? "1px solid rgba(59,130,246,0.5)" : "1px solid rgba(255,255,255,0.1)",
+          backdropFilter: "blur(8px)",
+          color: gpsLocating ? "#93c5fd" : "#94a3b8",
+        }}
+        title={t("yourLocation")}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+        </svg>
+        {gpsLocating ? "..." : "GPS"}
+      </button>
 
       {userLoc && (
         <div className="absolute bottom-2 left-0 right-0 z-[1000] text-xs text-center opacity-50">

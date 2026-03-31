@@ -1,105 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { WeatherData, SafetyLevel } from "@/lib/types";
+import { useState, useRef } from "react";
+import { WeatherData } from "@/lib/types";
 import { getSafetyColor } from "@/lib/safety";
 import { useI18n } from "@/contexts/I18nContext";
-
-const GAUGE_CIRCUMFERENCE = 2 * Math.PI * 48;
-
-function SafetyGauge({ score, level }: { score: number; level: SafetyLevel }) {
-  const color = getSafetyColor(level);
-  const [animated, setAnimated] = useState(0);
-  const { t } = useI18n();
-
-  useEffect(() => {
-    const timer = setTimeout(() => setAnimated(score), 100);
-    return () => clearTimeout(timer);
-  }, [score]);
-
-  const offset = GAUGE_CIRCUMFERENCE * (1 - animated / 100);
-
-  return (
-    <div className="flex flex-col items-center">
-      <svg viewBox="0 0 120 120" width="120" height="120">
-        <circle
-          cx="60"
-          cy="60"
-          r="48"
-          fill="none"
-          stroke="rgba(255,255,255,0.06)"
-          strokeWidth="8"
-        />
-        <circle
-          cx="60"
-          cy="60"
-          r="48"
-          fill="none"
-          stroke={color}
-          strokeWidth="8"
-          strokeDasharray={GAUGE_CIRCUMFERENCE}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          transform="rotate(-90 60 60)"
-          style={{
-            transition: "stroke-dashoffset 1.2s ease-out, stroke 0.5s ease",
-            filter: `drop-shadow(0 0 6px ${color}60)`,
-          }}
-        />
-        <text
-          x="60"
-          y="55"
-          textAnchor="middle"
-          fill={color}
-          fontSize="28"
-          fontWeight="bold"
-          fontFamily="Arial, sans-serif"
-        >
-          {score}
-        </text>
-        <text
-          x="60"
-          y="76"
-          textAnchor="middle"
-          fill={color}
-          fontSize="12"
-          fontFamily="Arial, sans-serif"
-          opacity="0.8"
-        >
-          {t(
-            level === "Safe"
-              ? "safe"
-              : level === "Caution"
-              ? "caution"
-              : "dangerous"
-          )}
-        </text>
-      </svg>
-    </div>
-  );
-}
-
-function WeatherStat({
-  label,
-  value,
-  unit,
-}: {
-  label: string;
-  value: string | number;
-  unit?: string;
-}) {
-  return (
-    <div className="flex flex-col items-center p-2">
-      <span className="text-xs opacity-60 uppercase tracking-wide">
-        {label}
-      </span>
-      <span className="text-lg font-semibold">
-        {value}
-        {unit && <span className="text-sm opacity-70 ml-0.5">{unit}</span>}
-      </span>
-    </div>
-  );
-}
 
 function SharePanel({ data }: { data: WeatherData }) {
   const { t } = useI18n();
@@ -244,24 +148,32 @@ export default function WeatherCard({
 
   if (!data) return null;
 
+  const safetyColor = getSafetyColor(data.safety_level);
+
   return (
     <div className="glass-card rounded-xl p-5">
-      {/* Header */}
+      {/* Header — location + compact safety badge */}
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-xl font-bold">{data.location}</h2>
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold truncate">{data.location}</h2>
           <p className="text-sm opacity-60 capitalize">
             {data.weather_description}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {data.weather_icon && (
-            <img
-              src={`https://openweathermap.org/img/wn/${data.weather_icon}@2x.png`}
-              alt={data.weather_description}
-              className="w-16 h-16"
-            />
-          )}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Compact safety badge */}
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
+            style={{
+              backgroundColor: `${safetyColor}15`,
+              border: `1px solid ${safetyColor}40`,
+            }}
+          >
+            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: safetyColor }} />
+            <span className="text-sm font-bold" style={{ color: safetyColor }}>
+              {data.safety_score}
+            </span>
+          </div>
           <button
             onClick={() => setShowShare(!showShare)}
             className="p-2 rounded-lg transition-colors"
@@ -295,41 +207,79 @@ export default function WeatherCard({
         </div>
       </div>
 
-      {/* Safety Gauge */}
-      <div className="flex justify-center mb-5">
-        <SafetyGauge score={data.safety_score} level={data.safety_level} />
+      {/* Primary: Weather Conditions Grid */}
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <div
+          className="rounded-lg p-3 text-center"
+          style={{
+            background: data.rain_mm > 2 ? "rgba(239,68,68,0.08)" : "rgba(15,23,42,0.45)",
+            border: `1px solid ${data.rain_mm > 2 ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.06)"}`,
+          }}
+        >
+          <div className="text-[11px] opacity-50 uppercase tracking-wide mb-1">{t("rain")}</div>
+          <div className="text-lg font-bold" style={{ color: data.rain_mm > 2 ? "#fca5a5" : "#e2e8f0" }}>
+            {data.rain_mm}<span className="text-xs opacity-60 ml-0.5">mm</span>
+          </div>
+          <div className="text-[10px] opacity-45 capitalize mt-0.5">{data.rain_intensity}</div>
+        </div>
+        <div
+          className="rounded-lg p-3 text-center"
+          style={{
+            background: "rgba(15,23,42,0.45)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <div className="text-[11px] opacity-50 uppercase tracking-wide mb-1">{t("temp")}</div>
+          <div className="text-lg font-bold">{data.temperature_c}<span className="text-xs opacity-60 ml-0.5">°C</span></div>
+          <div className="text-[10px] opacity-45 mt-0.5">{data.humidity_pct}% {t("humidity").toLowerCase()}</div>
+        </div>
+        <div
+          className="rounded-lg p-3 text-center"
+          style={{
+            background: data.wind_speed_kmh > 30 ? "rgba(234,179,8,0.08)" : "rgba(15,23,42,0.45)",
+            border: `1px solid ${data.wind_speed_kmh > 30 ? "rgba(234,179,8,0.2)" : "rgba(255,255,255,0.06)"}`,
+          }}
+        >
+          <div className="text-[11px] opacity-50 uppercase tracking-wide mb-1">{t("wind")}</div>
+          <div className="text-lg font-bold" style={{ color: data.wind_speed_kmh > 30 ? "#fde68a" : "#e2e8f0" }}>
+            {data.wind_speed_kmh}<span className="text-xs opacity-60 ml-0.5">km/h</span>
+          </div>
+        </div>
       </div>
 
-      {/* Riding advice */}
-      <div
-        className="text-center text-sm font-medium mb-4 py-2 px-3 rounded-lg"
-        style={{
-          backgroundColor: `${getSafetyColor(data.safety_level)}15`,
-          color: getSafetyColor(data.safety_level),
-        }}
-      >
-        {data.safety_level === "Safe" && t("goodConditions")}
-        {data.safety_level === "Caution" && t("rideCaution")}
-        {data.safety_level === "Dangerous" && t("avoidRiding")}
-      </div>
-
-      {/* Weather Stats Grid */}
-      <div className="grid grid-cols-3 gap-1 mb-3">
-        <WeatherStat label={t("temp")} value={data.temperature_c} unit="°C" />
-        <WeatherStat label={t("rain")} value={data.rain_mm} unit="mm" />
-        <WeatherStat label={t("wind")} value={data.wind_speed_kmh} unit="km/h" />
-      </div>
-      <div className="grid grid-cols-3 gap-1">
-        <WeatherStat label={t("humidity")} value={data.humidity_pct} unit="%" />
-        <WeatherStat label={t("visibility")} value={data.visibility_km} unit="km" />
-        <WeatherStat label={t("rainType")} value={data.rain_intensity} />
+      {/* Secondary row: visibility */}
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <div
+          className="rounded-lg p-2.5 text-center"
+          style={{
+            background: "rgba(15,23,42,0.35)",
+            border: "1px solid rgba(255,255,255,0.04)",
+          }}
+        >
+          <div className="text-[11px] opacity-50 uppercase tracking-wide mb-0.5">{t("visibility")}</div>
+          <div className="text-sm font-semibold">{data.visibility_km} km</div>
+        </div>
+        <div
+          className="rounded-lg p-2.5 text-center"
+          style={{
+            background: `${safetyColor}08`,
+            border: `1px solid ${safetyColor}20`,
+          }}
+        >
+          <div className="text-[11px] opacity-50 uppercase tracking-wide mb-0.5">{t("ridingAdvice")}</div>
+          <div className="text-sm font-semibold" style={{ color: safetyColor }}>
+            {data.safety_level === "Safe" && t("goodConditions")}
+            {data.safety_level === "Caution" && t("rideCaution")}
+            {data.safety_level === "Dangerous" && t("avoidRiding")}
+          </div>
+        </div>
       </div>
 
       {/* Share panel */}
       {showShare && <SharePanel data={data} />}
 
       {/* Timestamp */}
-      <div className="text-xs opacity-40 text-center mt-4">
+      <div className="text-xs opacity-40 text-center mt-3">
         {t("updated")} {new Date(data.fetched_at).toLocaleTimeString()}
         {data.cached && ` ${t("cached")}`}
       </div>
